@@ -1,0 +1,651 @@
+
+global Inst {
+  const ADD = 6h0;
+  const SUB = 6h1;
+  const MUL = 6h2;
+  const AND = 6h18;
+  const OR = 6h1e;
+  const XOR = 6h16;
+  const LDR = 6h1a;
+  const SHL = 6h20;
+  const SHR = 6h21;
+  const SRA = 6h23;
+  const CMPEQ = 6h33;
+  const CMPLT = 6h35;
+  const CMPLE = 6h37;
+}
+
+module mojo_top (
+    input clk,              // 50MHz clock
+    input rst_n,            // reset button (active low)
+    output led [8],         // 8 user controllable LEDs
+    input cclk,             // configuration clock, AVR ready when high
+    output spi_miso,        // AVR SPI MISO
+    input spi_ss,           // AVR SPI Slave Select
+    input spi_mosi,         // AVR SPI MOSI
+    input spi_sck,          // AVR SPI Clock
+    output spi_channel [4], // AVR general purpose pins (used by default to select ADC channel)
+    input avr_tx,           // AVR TX (FPGA RX)
+    output avr_rx,          // AVR RX (FPGA TX)
+    input avr_rx_busy,      // AVR RX buffer full
+    output io_led [3][8],   // LEDs on IO Shield
+    output io_seg [8],      // 7-segment LEDs on IO Shield
+    output io_sel [4],      // Digit select on IO Shield
+    input io_button [5],    // 5 buttons on IO Shield
+    input io_dip [3][8] // 7-segment LEDs on IO Shield
+  ) {
+  
+  sig rst;                  // reset signal
+  
+  
+  sig a[16];   
+  sig b[16]; 
+  sig acheck[1];
+  
+  sig bcheck[1];
+  sig alufn[6];
+  dff counter[27](.clk(clk), .rst(rst));
+  alu alu;
+
+  .clk(clk) {
+    // The reset conditioner is used to synchronize the reset signal to the FPGA
+    // clock. This ensures the entire FPGA comes out of reset at the same time.
+    reset_conditioner reset_cond;
+    
+    .rst(rst) {
+      // states alternate between each possible alu operation based on the buttons pressed
+      
+      // ERROR simulates the error case for adder.
+      fsm state = {LISTENA,LISTENB,PROCESS,AUTO,ADDERTEST1,ADDERTEST2,ADDERTEST3,ADDERTEST4,ADDERERRORTEST, ADDERERROR, BOOLTEST1, BOOLTEST2,BOOLTEST3, BOOLTEST4, BOOLERRORTEST,BOOLERROR, SHIFTTEST1,SHIFTTEST2,SHIFTTEST3, SHIFTERRORTEST,SHIFTERROR, COMPARETEST1, COMPARETEST2,COMPARETEST3,COMPARETEST4,COMPARETEST5,COMPARETEST6,COMPARETEST7, COMPAREERRORTEST, COMPAREERROR, MULTIPLYTEST1,MULTIPLYTEST2,MULTIPLYERRORTEST,MULTIPLYERROR,END};
+      multi_seven_seg seg;
+    }    
+  }
+  const DELAYTIME = 26;
+  var storea;
+  var storeb;
+  always {
+    
+    reset_cond.in = ~rst_n; // input raw inverted reset signal
+    rst = reset_cond.out;   // conditioned reset
+    
+   
+    
+    led = 8h00;             // turn LEDs off
+    spi_miso = bz;          // not using SPI
+    spi_channel = bzzzz;    // not using flags
+    avr_rx = bz;            // not using serial port
+    
+    io_led = 3x{{8h00}};    // turn LEDs off
+    io_seg = 8hff;          // turn segments off
+    io_sel = 4hf;           // select no digits
+    seg.values = {4d9, 4d9, 4d9, 4d9};//in case nth
+    io_seg = ~seg.segs;
+    io_sel = ~seg.sel;
+    
+    // Manual testing (dip switches used)    a[15:0] = io_dip[0];
+    b[15:0] = io_dip[1];
+    a[15:0] = io_dip[1];
+    alufn = io_dip[2][5:0]; 
+    acheck = io_dip[2][7];  
+    bcheck = io_dip[2][6];  
+    alu.a =16b0;
+    alu.b = 16b0;
+    alu.alufn = 6b0; 
+    
+    // start initiates the testing for each module
+    
+   
+    
+    
+     case (state.q) {
+        state.LISTENA:
+      //joannas A
+          seg.values={4d10,4d9,4d9,4d9};
+          if(acheck==1){
+        
+            state.d=state.LISTENB;
+            storea=c{io_dip[1],io_dip[0]};
+            }
+          if(io_button[4] ==1){
+            counter.d=0;
+            state.d=state.ADDERTEST1;
+          }
+         io_led[2][5:0] = io_dip[2][5:0];
+         io_led[0] = io_dip[0];
+         io_led[1] = io_dip[1];
+        
+        state.LISTENB:
+      //joannas b
+          
+          seg.values={4d9,4d8,4d9,4d9};
+          if(bcheck==1){
+            state.d=state.PROCESS;
+            storeb=c{io_dip[1],io_dip[0]};
+          if(io_button[4] ==1){
+            state.d=state.ADDERTEST1;
+          }
+            }
+         io_led[2][5:0] = io_dip[2][5:0];
+         io_led[0] = io_dip[0];    
+         io_led[1] = io_dip[1];
+        state.PROCESS:
+          alu.a =storea;
+          alu.b = storeb;
+          alu.alufn = alufn; 
+          state.d=state.PROCESS;
+          
+          if(io_button[4] ==1){
+            state.d=state.ADDERTEST1;
+          }
+          if(io_dip[2][7:6]==2b0){
+            state.d = state.LISTENA;
+          }
+          
+          if(alu.larger ==0){
+            io_led[2][5:0] = io_dip[2][5:0];
+            io_led[0] = alu.result[7:0];
+            io_led[1] = alu.result[15:8];
+          }
+          else {
+      
+            seg.values={4d9,4d14,4d0,4d9};
+          }
+        state.ADDERTEST1: // addition without overflow
+    alu.alufn = 6b0;
+    alu.a = 16b101;// input a = 5
+    alu.b = 16b101; // input b = 5
+    seg.values={4d10,4d0,4d0,4d1};
+    //ignore the line to display A bits
+    //ignore the line to display B bits
+    //ignore the line to show "A" on seven_seg
+    if (counter.q[DELAYTIME]==1&& alu.result==16b1010){
+          counter.d = 0; 
+          state.d = state.ADDERTEST2; 
+    }
+    else if (counter.q[DELAYTIME] == 1 && alu.result!= 16b1010){
+        counter.d=0; 
+        state.d=state.ADDERERROR;
+    } else{
+        counter.d = counter.q+1;
+    }
+
+
+
+    state.ADDERTEST2: //addition with overflow
+    alu.alufn = 6b0;
+    alu.a = 16h7FFF;// input a = 32767
+    alu.b = 16h7FFF; // input b = 32767
+    seg.values={4d10,4d0,4d0,4d2};
+    //ignore the line to display A bits
+    //ignore the line to display B bits
+    //ignore the line to show "A" on seven_seg
+    if (counter.q[DELAYTIME]==1&&alu.result==16hFFFE){
+          counter.d = 0; 
+          state.d = state.ADDERTEST3; 
+    }
+    else if (counter.q[DELAYTIME] == 1 && alu.result!= 16hFFFE){
+        counter.d=0; 
+        state.d=state.ADDERERROR;
+    }else{
+        counter.d = counter.q+1;
+    }
+
+
+
+
+    state.ADDERTEST3: //subtraction with no overflow
+    alu.alufn = 6b1;
+    alu.a = 16h1F4;// input a = 500
+    alu.b = 16h190; // input b = 400
+    seg.values={4d10,4d0,4d0,4d3};
+    //ignore the line to display A bits
+    //ignore the line to display B bits
+    //ignore the line to show "A" on seven_seg
+    if (counter.q[DELAYTIME]==1&&alu.result==16h64){
+          counter.d = 0; 
+          state.d = state.ADDERTEST4; 
+    }
+    else if (counter.q[DELAYTIME] == 1 && alu.result!= 16h64){
+        counter.d=0; 
+        state.d=state.ADDERERROR;
+    }else{
+        counter.d = counter.q+1;
+    }
+
+
+    
+    state.ADDERTEST4: //subtraction with overflow (-32867 16h8063)
+    alu.alufn = 6b1;
+    alu.a = 16h8001;// input a = - 32767
+    alu.b = 16h0064; // input b = 100
+    seg.values={4d10,4d0,4d0,4d3};
+    //ignore the line to display A bits
+    //ignore the line to display B bits
+    //ignore the line to show "A" on seven_seg
+    if (counter.q[DELAYTIME]==1&&alu.result==16h8063){
+          counter.d = 0; 
+          state.d = state.ADDERERRORTEST; 
+    }
+    else if (counter.q[DELAYTIME] == 1 && alu.result!= 16h8063){
+        counter.d=0; 
+        state.d=state.ADDERERROR;
+    }else{
+        counter.d = counter.q+1;
+    }
+
+
+
+
+    state.ADDERERRORTEST://Simulated ADDER error test case: 5+7=12 (+1)
+    alu.alufn = 6b0; 
+    alu.a = 16b101;
+    alu.b = 16b111;
+    seg.values={4d10,4d4,4d4,4d5};
+    //ignore the line to display A bits
+    //ignore the line to display B bits
+    //ignore the line to show "A" on seven_seg
+    if (counter.q[DELAYTIME] ==1&&alu.result+1==16b1100){ 
+        counter.d = 0;
+        state.d = state.BOOLTEST1;
+    }
+    else if (counter.q[DELAYTIME] == 1 && alu.result!= 16b1100){ 
+        counter.d=0;
+        state.d=state.ADDERERROR;}
+    else{
+        counter.d = counter.q+1;
+    }
+
+
+    state.ADDERERROR: //ADDER ERROR
+    //display something on seven_seg to show error
+    
+
+    seg.values={4d9,4d14,4d0,4d9};
+    if (counter.q[DELAYTIME]==1){ //once counter reaches defined value
+        counter.d = 0;
+        state.d = state.MULTIPLYTEST1;} //move to test the next unit
+    else{
+        counter.d = counter.q+1;
+    }
+
+    state.MULTIPLYTEST1: // Multiplication without overflow (5*5=25)
+    seg.values={4d14,4d14,4d9,4d1};
+    alu.alufn = 6b10;
+    alu.a = 16b101;  // input a = 5
+    alu.b = 16b101; // input b = 5
+    if (counter.q[DELAYTIME]==1&&alu.result==16h19){
+          counter.d = 0; 
+          state.d = state.MULTIPLYTEST2; 
+    }
+    else if (counter.q[DELAYTIME] == 1 && alu.result!= 16h19){
+        counter.d=0; 
+        state.d=state.MULTIPLYERROR;
+    }
+    else{
+        counter.d = counter.q+1;
+    }
+
+
+
+    state.MULTIPLYTEST2: // Multiplication with 0
+    seg.values={4d14,4d14,4d9,4d2};
+    alu.alufn = 6b10;
+    alu.a = 16b10;  // input a = 5
+    alu.b = 16b0; // input b = 0 
+    if (counter.q[DELAYTIME]==1&&alu.result==16b0){
+          counter.d = 0; 
+          state.d = state.MULTIPLYERRORTEST; 
+    }
+    else if (counter.q[DELAYTIME] == 1 && alu.result!= 16b0){
+        counter.d=0; 
+        state.d=state.MULTIPLYERROR;
+    }
+    else{
+        counter.d = counter.q+1;
+    }
+
+    state.MULTIPLYERRORTEST: // Multiplication of 5*5 + 1 =26
+    seg.values={4d14,4d14,4d9,4d3};
+    alu.alufn = 6b10;
+    alu.a = 16b101;  // input a = 5
+    alu.b = 16b101;  // input b = 5 
+    if (counter.q[DELAYTIME]==1&&alu.result+1==16h19){
+          counter.d = 0; 
+          state.d = state.BOOLTEST1; 
+    }
+    else if (counter.q[DELAYTIME] == 1 && alu.result+1!= 16h19){
+        counter.d=0; 
+        state.d=state.MULTIPLYERROR;
+    }
+    else{
+        counter.d = counter.q+1;
+    }
+
+    state.MULTIPLYERROR: //MULTIPLY ERROR
+    //display something on seven_seg to show error
+    
+
+    seg.values={4d9,4d14,4d0,4d9};
+    if (counter.q[DELAYTIME]==1){ //once counter reaches defined value
+        counter.d = 0;
+        state.d = state.BOOLTEST1;} //move to test the next unit
+    else{
+        counter.d = counter.q+1;
+    }
+
+
+
+    state.BOOLTEST1: //BOOL Test case 1(AND): 16h2AE8 && 16h36A8 = 16h22A8 
+    seg.values={4d8,4d0,4d0,4d1};
+			// 10101011101000
+                        //*11011010101000
+                        //----------------
+                        // 10001010101000
+    alu.alufn = 6b11000; 
+    alu.a = 16h2AE8;                                //input a = 10984
+    alu.b = 16h36A8;                                //input b = 13992
+    if (counter.q[DELAYTIME] ==1&&alu.result==16h22A8){
+        counter.d = 0;
+        state.d = state.BOOLTEST2;
+    }else if (counter.q[DELAYTIME] == 1 && alu.result!= 16h22A8){
+        counter.d=0;
+        state.d=state.BOOLERROR;}
+    else{
+        counter.d = counter.q+1;
+    }
+
+    state.BOOLTEST2: //BOOL Test case 2(OR): 16h62E0|| 16h5340 = 16hB620
+    seg.values={4d8,4d0,4d0,4d2};
+			// 110001011100000
+                        //+101001101000000
+                        //-----------------
+                        //1011011000100000
+    alu.alufn = 16b11110; 
+    alu.a = 16h62E0;                        //input a = 25312
+    alu.b = 16h5340;                        //input b = 21312
+    if (counter.q[DELAYTIME] ==1&&alu.result==16hB620){
+        counter.d = 0;
+        state.d = state.BOOLTEST3;
+    }else if (counter.q[DELAYTIME] == 1 && alu.result!= 16hB620){
+        counter.d=0;
+        state.d=state.BOOLERROR;}
+    else{
+        counter.d = counter.q+1;
+    }
+    
+    state.BOOLTEST3: //BOOL Test case 3(XOR): 16h79F5^16h7209 = 16h0BFC
+    seg.values={4d8,4d0,4d0,4d3};
+			// 0111100111110101
+                        // 0111001000001001
+                        //------------------
+                        // 0000101111111100
+    alu.alufn = 6b10110; 
+    alu.a = 16h79F5;                    //input a = 31221 
+    alu.b = 16h7209;                    //input b = 29193 
+    if (counter.q[DELAYTIME] == 1 && alu.result== 16h0BFC){
+        counter.d = 0;
+        state.d = state.BOOLTEST4;
+    }else if (counter.q[DELAYTIME] == 1 && alu.result != 16h0BFC){
+        counter.d=0;
+        state.d=state.BOOLERROR;
+    }
+    else{
+        counter.d = counter.q+1;
+    }
+
+
+
+
+    //state.BOOLTEST4: //BOOL Test case 4("A"LDR): 8b11010100
+    //seg.values={4d8,4d0,4d0,4d4};
+    //alu.alufn = 6b11010; 
+    //alu.a = 16h8A60;
+    //alu.b = 16h8E48;       
+    //if (counter.q[DELAYTIME] ==1&&alu.result==16h8A60){
+    //    counter.d = 0;
+    //    state.d = state.BOOLERRORTEST;
+    //}else if (counter.q[DELAYTIME] == 1 && alu.result!= 16h8A60){
+    //    counter.d=0;
+    //    state.d=state.BOOLERROR;}
+    //else{
+    //    counter.d = counter.q+1;
+    //}
+
+        
+    state.BOOLERRORTEST:
+    seg.values={4d8,4d0,4d0,4d5};
+    alu.alufn = 6b11010; 
+    alu.a = 16b11010101;
+    alu.b = 16b00110011;             
+    if (counter.q[DELAYTIME] ==1&&alu.result+1==16b11010101){
+        counter.d = 0;
+        state.d = state.BOOLERRORTEST;
+    }else if (counter.q[DELAYTIME] == 1 && alu.result+1!= 16b11010101){
+        counter.d=0;
+        state.d=state.BOOLERROR;}
+    else{
+        counter.d = counter.q+1;
+    }
+
+    state.BOOLERROR: //BOOL ERROR
+      
+    seg.values={4d9,4d14,4d0,4d9};
+    //display error word TODO
+    if (counter.q[DELAYTIME]==1){
+        counter.d = 0;
+        state.d = state.SHIFTTEST1;}
+    else{
+        counter.d = counter.q+1;
+    }
+
+
+
+
+    state.SHIFTTEST1: //SHIFTER Test case1(SHIFT LEFT): 16hFE << 4 = 16hFE0
+    
+    alu.alufn = 6b100000; 
+    alu.a = 16hFE;                                  //input a = 254
+    alu.b = 16h2;                                   //input b = 10    
+    seg.values={4d5,4d13,4d12,4d1};          
+    if (counter.q[DELAYTIME] ==1&&alu.result==16hFE0){
+        counter.d = 0;
+        state.d = state.SHIFTTEST2;
+    }else if (counter.q[DELAYTIME] == 1 && alu.result!= 16hFE0){
+        counter.d=0;
+        state.d=state.SHIFTERROR;}
+    else{
+        counter.d = counter.q+1;
+    }
+
+    state.SHIFTTEST2: //SHIFTER Test case 2(SHIFT RIGHT): 16hC0 >> 8 = 16hC000
+    alu.alufn = 6b100001; 
+    alu.a = 16hC0;                                  //input a = 192
+    alu.b = 16h159;                                 //input b = 345 
+    seg.values={4d5,4d13,4d12,4d2};               
+    if (counter.q[DELAYTIME] ==1&&alu.result==16hC000){
+        counter.d = 0;
+        state.d = state.SHIFTTEST3;
+    }else if (counter.q[DELAYTIME] == 1 && alu.result!= 16hC000){
+        counter.d=0;
+        state.d=state.SHIFTERROR;}
+    else{
+        counter.d = counter.q+1;
+    }
+
+
+
+    state.SHIFTTEST3: //SHIFTER Test case 3(ARITHMETIC RIGHT SHIFT): 16hB4 >>> 5 = 16h3F41
+    alu.alufn = 6b100011; 
+    alu.a = 16hB4;                            //input a = 1345
+    alu.b = 16h82D;                           //input b = 2093   
+        
+    seg.values={4d5,4d13,4d12,4d3};   
+    if (counter.q[DELAYTIME] ==1&&alu.result==16h3F41){
+        counter.d = 0;
+        state.d = state.SHIFTERRORTEST;
+    } else if (counter.q[DELAYTIME] == 1 && alu.result!= 16h3F41){
+        counter.d=0;
+        state.d=state.SHIFTERROR;}
+    else{
+        counter.d = counter.q+1;
+    }
+
+    state.SHIFTERRORTEST: //SHIFTER error test case : 16b01101100 >>> 2 = 16b00011011 (+1)
+    alu.alufn = 6b100001; 
+    alu.a = 16b01101100;
+    alu.b = 16b10;
+    seg.values={4d5,4d13,4d12,4d4};   
+    if (counter.q[DELAYTIME] ==1&&alu.result + 1==16b00011011){
+        counter.d = 0;
+        state.d = state.SHIFTERRORTEST;
+    } else if (counter.q[DELAYTIME] == 1 && alu.result + 1!= 16b00011011){
+        counter.d=0;
+        state.d=state.SHIFTERROR;}
+    else{
+        counter.d = counter.q+1;
+    }
+    
+    state.SHIFTERROR: //SHIFTER ERROR
+    
+    seg.values={4d9,4d14,4d0,4d9};
+    if (counter.q[DELAYTIME]==1){
+        counter.d = 0;
+        state.d = state.COMPARETEST1;}
+    else{
+        counter.d = counter.q+1;
+    }
+    state.COMPARETEST1: //COMPARE EQUAL TO BE TRUE
+    alu.alufn = 6b110011; 
+    alu.a = 16b10110101;
+    alu.b = 16b10110101;
+    seg.values={4d11,4d0,4d15,4d1};              
+    if (counter.q[DELAYTIME] ==1&&alu.result==16b1){
+        counter.d = 0;
+        state.d = state.COMPARETEST2;
+    }  else if (counter.q[DELAYTIME] == 1 && alu.result!= 16b1){
+        counter.d=0;
+        state.d=state.COMPAREERROR;}
+    else{
+        counter.d = counter.q+1;
+    }
+    state.COMPARETEST2: //COMPARE EQUAL TO BE FALSE
+    alu.alufn = 6b110011; 
+    alu.a = 16b10110100;
+    alu.b = 16b10110101;        
+    seg.values={4d11,4d0,4d15,4d2};      
+    if (counter.q[DELAYTIME] ==1&&alu.result==16b0){
+        counter.d = 0;
+        state.d = state.COMPARETEST3;
+    }  else if (counter.q[DELAYTIME] == 1 && alu.result!= 16b1){
+        counter.d=0;
+        state.d=state.COMPAREERROR;}
+    else{
+        counter.d = counter.q+1;
+    }
+
+    state.COMPARETEST3: //COMPARE LESS THAN TO BE TRUE
+    alu.alufn = 6b110101; 
+    alu.a = 16b10110100;
+    alu.b = 16b10110101;
+    seg.values={4d11,4d0,4d15,4d3};              
+    if (counter.q[DELAYTIME] ==1&&alu.result==16b1){
+        counter.d = 0;
+        state.d = state.COMPARETEST4;
+    }  else if (counter.q[DELAYTIME] == 1 && alu.result!= 16b1){
+        counter.d=0;
+        state.d=state.COMPAREERROR;}
+    else{
+        counter.d = counter.q+1;
+    }
+
+    state.COMPARETEST4: //COMPARE LESS THAN TO BE FALSE
+    alu.alufn = 6b110101; 
+    alu.a = 16b10110101;
+    alu.b = 16b10110100;
+    seg.values={4d11,4d0,4d15,4d4};              
+    if (counter.q[DELAYTIME] ==1&&alu.result==16b0){
+        counter.d = 0;
+        state.d = state.COMPARETEST5;
+    }  else if (counter.q[DELAYTIME] == 1 && alu.result!= 16b0){
+        counter.d=0;
+        state.d=state.COMPAREERROR;}    
+    else{
+        counter.d = counter.q+1;
+    }
+    state.COMPARETEST5: //COMPARE LESS THAN OR EQUAL TO TO BE TRUE A=B
+    alu.alufn = 6b110111; 
+    alu.a = 16b10110101;
+    alu.b = 16b10110101;
+    seg.values={4d11,4d0,4d15,4d5};              
+    if (counter.q[DELAYTIME] ==1&&alu.result==16b1){
+        counter.d = 0;
+        state.d = state.COMPARETEST6;
+    }  else if (counter.q[DELAYTIME] == 1 && alu.result!= 16b1){
+        counter.d=0;
+        state.d=state.COMPAREERROR;} 
+    else{
+        counter.d = counter.q+1;
+    }
+    state.COMPARETEST6: //COMPARE LESS THAN OR EQUAL TO TO BE TRUE A<B
+    alu.alufn = 6b110111; 
+    alu.a = 16b10110101;
+    alu.b = 16b10110101;
+    seg.values={4d11,4d0,4d15,4d6};              
+    if (counter.q[DELAYTIME] ==1&&alu.result==16b1){
+        counter.d = 0;
+        state.d = state.COMPARETEST7;
+    }  else if (counter.q[DELAYTIME] == 1 && alu.result!= 16b1){
+        counter.d=0;
+        state.d=state.COMPAREERROR;} 
+    else{
+        counter.d = counter.q+1;
+    }
+
+    state.COMPARETEST7: //COMPARE LESS THAN OR EQUAL TO TO BE FALSE A>B
+    alu.alufn = 6b110111; 
+    alu.a = 16b10110111;
+    alu.b = 16b10110101;
+    seg.values={4d11,4d0,4d15,4d7};              
+    if (counter.q[DELAYTIME] ==1&&alu.result==16b0){
+        counter.d = 0;
+        state.d = state.COMPAREERRORTEST;
+    }  else if (counter.q[DELAYTIME] == 1 && alu.result!= 16b0){
+        counter.d=0;
+        state.d=state.COMPAREERROR;}
+    else{
+        counter.d = counter.q+1;
+    }
+
+
+    state.COMPAREERRORTEST: //COMPARE EQUALS TO FORCE FALSE
+    alu.alufn = 6b110011; 
+    alu.a = 16b10110101;
+    alu.b = 16b10110101;
+    seg.values={4d11,4d0,4d15,4d8};              
+    if (counter.q[DELAYTIME] ==1&&alu.result+1==16b1){
+        counter.d = 0;
+        state.d = state.LISTENA;
+    }  else if (counter.q[DELAYTIME] == 1 && alu.result+1!= 16b1){
+        counter.d=0;
+        state.d=state.COMPAREERROR;}
+    else{
+        counter.d = counter.q+1;
+    }
+
+
+
+    state.COMPAREERROR: //COMPARE ERROR 
+    seg.values={4d9,4d14,4d0,4d9};   
+    if (counter.q[DELAYTIME]==1){
+        counter.d = 0;
+        state.d = state.LISTENA;}
+    else{
+        counter.d = counter.q+1;
+    } 
+
+    
+            
+    }
+    
+  }
+}
